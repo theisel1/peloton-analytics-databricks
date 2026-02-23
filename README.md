@@ -1,79 +1,89 @@
 # Peloton -> Databricks Python Pipeline
 
-This project extracts workout data from Peloton, loads it into Databricks tables, and runs ML to generate workout insights.
+This project pulls Peloton workout data and writes it directly to Databricks Delta tables, then trains ML models for insights.
 
-## What This Pipeline Does
+## Architecture
 
-1. Authenticates to Peloton and extracts workouts + performance metrics.
-2. Normalizes data into tabular CSVs.
-3. Loads tables into Databricks SQL Warehouse (`peloton_workouts`, `peloton_metrics`).
-4. Trains ML models to:
-   - Predict workout `total_work`.
-   - Cluster workouts into segments.
-5. Writes artifacts:
-   - `models/peloton_work_model.joblib`
-   - `models/cluster_summary.csv`
-   - `reports/insights.md`
+- Extract from Peloton API (OAuth flow)
+- Load directly to Databricks Delta tables:
+  - `main.fitness.peloton_workouts`
+  - `main.fitness.peloton_metrics`
+- Train ML model + clustering and write artifacts
 
-## Setup
+Local staging files are **off by default**.
 
-### 1. Install dependencies
+## Recommended: Run Entirely In Databricks
+
+Run this code as a Databricks Workflow job (Python task).
+
+### 1. Job environment variables
+
+Set these in the job/task environment:
+
+- `PELOTON_USERNAME`
+- `PELOTON_PASSWORD`
+- optional `PELOTON_SINCE`
+- optional `PELOTON_MAX_WORKOUTS`
+- `USE_DATABRICKS_SPARK=true`
+- `WRITE_LOCAL_STAGING=false`
+- optional `DATABRICKS_ARTIFACT_BASE_PATH=/dbfs/FileStore/peloton_analytics`
+- optional `DATABRICKS_CATALOG=main`
+- optional `DATABRICKS_SCHEMA=fitness`
+
+### 2. Job command
+
+Use either:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+peloton-pipeline run-all --use-spark-loader
 ```
 
-### 2. Configure environment
+or the included Databricks entrypoint:
 
 ```bash
+python databricks/run_pipeline.py
+```
+
+This path writes directly to Delta tables via Spark (no local CSV/JSON staging).
+
+## Local Execution (Fallback)
+
+Use this only when you want to run outside Databricks.
+
+### Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
 cp .env.example .env
 ```
 
-Fill `.env` with:
-- `PELOTON_USERNAME`
-- `PELOTON_PASSWORD`
+For local SQL API mode, `.env` must include:
+
 - `DATABRICKS_SERVER_HOSTNAME`
 - `DATABRICKS_HTTP_PATH`
 - `DATABRICKS_ACCESS_TOKEN`
-- optional `PELOTON_SINCE`
 
-## Run Commands
-
-Extract only:
-
-```bash
-peloton-pipeline extract
-```
-
-Load only (reads processed CSVs):
-
-```bash
-peloton-pipeline load
-```
-
-Train only (reads from Databricks):
-
-```bash
-peloton-pipeline train
-```
-
-Run full pipeline:
+### Commands
 
 ```bash
 peloton-pipeline run-all
 ```
 
-## Output Data
+If you want local staging files:
 
-- Raw JSON: `data/raw/`
-- Processed CSV: `data/processed/`
-- SQL DDL + views: `sql/`
-- ML artifacts: `models/` and `reports/`
+```bash
+peloton-pipeline run-all --write-local-staging
+```
+
+## ML Artifacts
+
+- Databricks mode default: `/dbfs/FileStore/peloton_analytics/models` and `/dbfs/FileStore/peloton_analytics/reports`
+- Local mode default: `./models` and `./reports`
 
 ## Notes
 
-- Peloton endpoints are not officially public/stable, so endpoint behavior can change.
-- Use a Databricks SQL Warehouse with permissions to create schema/table and run MERGE.
-- For production: move secrets to a secret manager and orchestrate with Airflow/Databricks Workflows.
+- Peloton endpoints are unofficial and may change.
+- In Databricks mode, Spark is used directly for table writes.
+- In local mode, Databricks SQL Statements API is used.

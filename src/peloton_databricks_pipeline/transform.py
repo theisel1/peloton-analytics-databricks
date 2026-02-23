@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -9,7 +9,7 @@ import pandas as pd
 def _iso_utc(epoch_seconds: int | None) -> str | None:
     if epoch_seconds is None:
         return None
-    return datetime.fromtimestamp(epoch_seconds, tz=UTC).isoformat()
+    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat()
 
 
 def workouts_to_dataframe(workouts: list[dict[str, Any]]) -> pd.DataFrame:

@@ -5,6 +5,7 @@ __all__ = [
     "peloton_api",
     "transform",
     "databricks_loader",
+    "databricks_spark_loader",
     "ml",
     "pipeline",
 ]

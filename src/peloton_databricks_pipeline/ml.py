@@ -30,15 +30,21 @@ def train_and_generate_insights(
     ]
 
     target_column = "total_work"
+    numeric_columns = list({target_column, *feature_columns, "avg_output"})
+    for column in numeric_columns:
+        if column in training_df.columns:
+            training_df[column] = pd.to_numeric(training_df[column], errors="coerce")
 
     usable = training_df[[target_column, *feature_columns]].copy()
-    usable[target_column] = pd.to_numeric(usable[target_column], errors="coerce")
     usable = usable.dropna(subset=[target_column])
     if len(usable) < 8:
         raise ValueError("Need at least 8 workouts with target values for reliable ML training.")
 
-    X = usable[feature_columns]
+    X = usable[feature_columns].copy()
     y = usable[target_column]
+    for column in feature_columns:
+        if X[column].notna().sum() == 0:
+            X.loc[:, column] = 0.0
 
     imputer = SimpleImputer(strategy="median")
     X_imputed = imputer.fit_transform(X)
@@ -53,8 +59,12 @@ def train_and_generate_insights(
     r2 = float(r2_score(y_test, y_pred))
 
     kmeans_features = ["ride_duration", "avg_heart_rate", "avg_output", "avg_resistance"]
+    for column in kmeans_features:
+        if column not in training_df.columns:
+            training_df[column] = np.nan
     cluster_frame = training_df[kmeans_features].apply(pd.to_numeric, errors="coerce")
     cluster_frame = cluster_frame.fillna(cluster_frame.median(numeric_only=True))
+    cluster_frame = cluster_frame.fillna(0)
 
     n_clusters = min(3, len(cluster_frame))
     if n_clusters < 2:
@@ -95,7 +105,7 @@ def train_and_generate_insights(
         for feature, importance in importances.items():
             f.write(f"- {feature}: {importance:.3f}\n")
         f.write(f"\n## Workout Segments (KMeans, k={n_clusters})\n")
-        f.write(cluster_summary.to_markdown())
+        f.write(cluster_summary.to_string())
         f.write("\n")
 
     return {
