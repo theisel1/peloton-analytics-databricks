@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Environment
+.env
+
+# Pipeline outputs
+data/raw/
+data/processed/
+models/
+reports/
