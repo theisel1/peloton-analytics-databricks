@@ -6,6 +6,7 @@ __all__ = [
     "transform",
     "databricks_loader",
     "databricks_spark_loader",
+    "lakehouse",
     "ml",
     "pipeline",
 ]

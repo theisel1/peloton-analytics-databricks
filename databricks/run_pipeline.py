@@ -1,8 +1,8 @@
-"""Databricks Job entrypoint: run Peloton ingestion directly into Delta tables."""
+"""Databricks Job entrypoint: run Peloton medallion + ML pipeline."""
 
-from peloton_databricks_pipeline.pipeline import run_all
+from peloton_databricks_pipeline.pipeline import run_lakehouse
 
 
 if __name__ == "__main__":
-    results = run_all(use_spark_loader=True, write_local_staging=False)
+    results = run_lakehouse(write_local_staging=False)
     print(results)

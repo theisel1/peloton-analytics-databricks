@@ -62,7 +62,9 @@ def _build_loader(settings: Settings, force_spark_loader: bool = False):
     )
 
 
-def run_extract(write_local_staging: bool | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def extract_with_raw_payloads(
+    write_local_staging: bool | None = None,
+) -> tuple[list[dict], list[dict], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     settings = get_settings()
     settings.require_peloton()
     assert settings.peloton_username is not None
@@ -102,6 +104,11 @@ def run_extract(write_local_staging: bool | None = None) -> tuple[pd.DataFrame, 
         metrics_df.to_csv(PROC_METRICS_PATH, index=False)
         training_df.to_csv(PROC_TRAIN_PATH, index=False)
 
+    return workouts, raw_performance, workouts_df, metrics_df, training_df
+
+
+def run_extract(write_local_staging: bool | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    _, _, workouts_df, metrics_df, training_df = extract_with_raw_payloads(write_local_staging=write_local_staging)
     return workouts_df, metrics_df, training_df
 
 
@@ -152,17 +159,66 @@ def run_all(
     write_local_staging: bool | None = None,
     model_base_path: str | None = None,
 ) -> dict[str, float | int]:
+    settings = get_settings()
+    if _should_use_spark_loader(settings, use_spark_loader):
+        return run_lakehouse(
+            write_local_staging=write_local_staging,
+            model_base_path=model_base_path,
+        )
+
     workouts_df, metrics_df, _ = run_extract(write_local_staging=write_local_staging)
     run_load(workouts_df, metrics_df, use_spark_loader=use_spark_loader)
     return run_train(use_spark_loader=use_spark_loader, model_base_path=model_base_path)
+
+
+def run_lakehouse(
+    write_local_staging: bool | None = None,
+    model_base_path: str | None = None,
+) -> dict[str, float | int]:
+    settings = get_settings()
+    try:
+        from .databricks_spark_loader import DatabricksSparkLoader
+        from .lakehouse import ingest_to_lakehouse
+    except Exception as exc:
+        raise RuntimeError(
+            "Lakehouse mode requires Databricks runtime with PySpark available."
+        ) from exc
+
+    workouts_raw, performance_raw, workouts_df, metrics_df, _ = extract_with_raw_payloads(
+        write_local_staging=write_local_staging
+    )
+
+    loader = DatabricksSparkLoader(
+        catalog=settings.databricks_catalog,
+        schema=settings.databricks_schema,
+    )
+    lakehouse_result = ingest_to_lakehouse(
+        loader=loader,
+        workouts_raw=workouts_raw,
+        performance_raw=performance_raw,
+        workouts_df=workouts_df,
+        metrics_df=metrics_df,
+    )
+
+    train_result = run_train(use_spark_loader=True, model_base_path=model_base_path)
+    return {
+        "bronze_workouts_rows": lakehouse_result.workouts_raw_rows,
+        "bronze_metrics_rows": lakehouse_result.metrics_raw_rows,
+        "silver_workouts_rows": lakehouse_result.workouts_rows,
+        "silver_metrics_rows": lakehouse_result.metrics_rows,
+        "rows_used_for_training": int(train_result["rows_used_for_training"]),
+        "mae": float(train_result["mae"]),
+        "r2": float(train_result["r2"]),
+        "cluster_count": int(train_result["cluster_count"]),
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Peloton -> Databricks pipeline")
     parser.add_argument(
         "command",
-        choices=["extract", "load", "train", "run-all"],
-        help="extract raw data, load to Databricks, train ML model, or run-all",
+        choices=["extract", "load", "train", "run-all", "run-lakehouse"],
+        help="extract raw data, load, train, run-all, or run-lakehouse",
     )
     parser.add_argument(
         "--write-local-staging",
@@ -190,6 +246,12 @@ def main() -> None:
     elif args.command == "train":
         results = run_train(use_spark_loader=args.use_spark_loader, model_base_path=args.model_base_path)
         print(f"Training complete: {results}")
+    elif args.command == "run-lakehouse":
+        results = run_lakehouse(
+            write_local_staging=args.write_local_staging,
+            model_base_path=args.model_base_path,
+        )
+        print(f"Lakehouse pipeline complete: {results}")
     else:
         results = run_all(
             use_spark_loader=args.use_spark_loader,

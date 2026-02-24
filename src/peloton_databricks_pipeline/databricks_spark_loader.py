@@ -22,6 +22,9 @@ class DatabricksSparkLoader:
     def _table_name(self, table: str) -> str:
         return f"{self._q(self.catalog)}.{self._q(self.schema)}.{self._q(table)}"
 
+    def table_name(self, table: str) -> str:
+        return self._table_name(table)
+
     def ensure_schema_and_tables(self) -> None:
         self.spark.sql(f"CREATE SCHEMA IF NOT EXISTS {self._q(self.catalog)}.{self._q(self.schema)}")
 
@@ -61,7 +64,7 @@ class DatabricksSparkLoader:
             """
         )
 
-    def _insert_dataframe(self, table: str, df: pd.DataFrame, key_columns: Iterable[str]) -> None:
+    def upsert_dataframe(self, table: str, df: pd.DataFrame, key_columns: Iterable[str]) -> None:
         if df.empty:
             return
 
@@ -93,8 +96,8 @@ class DatabricksSparkLoader:
 
     def load(self, workouts_df: pd.DataFrame, metrics_df: pd.DataFrame) -> None:
         self.ensure_schema_and_tables()
-        self._insert_dataframe("peloton_workouts", workouts_df, key_columns=["workout_id"])
-        self._insert_dataframe("peloton_metrics", metrics_df, key_columns=["workout_id", "metric_name"])
+        self.upsert_dataframe("peloton_workouts", workouts_df, key_columns=["workout_id"])
+        self.upsert_dataframe("peloton_metrics", metrics_df, key_columns=["workout_id", "metric_name"])
 
     def read_training_frame(self) -> pd.DataFrame:
         workouts_table = self._table_name("peloton_workouts")
