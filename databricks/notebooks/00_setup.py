@@ -30,6 +30,14 @@ peloton_max_workouts = dbutils.widgets.get("peloton_max_workouts")
 
 # COMMAND ----------
 
+def _normalize_workspace_root(path: str) -> str:
+    if path.startswith("/Workspace/"):
+        return path
+    if path.startswith("/Users/") or path.startswith("/Repos/"):
+        return f"/Workspace{path}"
+    return path
+
+repo_root = _normalize_workspace_root(repo_root)
 src_path = str(Path(repo_root) / "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)

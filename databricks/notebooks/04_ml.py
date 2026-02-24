@@ -26,6 +26,14 @@ artifact_base_path = dbutils.widgets.get("artifact_base_path")
 
 # COMMAND ----------
 
+def _normalize_workspace_root(path: str) -> str:
+    if path.startswith("/Workspace/"):
+        return path
+    if path.startswith("/Users/") or path.startswith("/Repos/"):
+        return f"/Workspace{path}"
+    return path
+
+repo_root = _normalize_workspace_root(repo_root)
 src_path = str(Path(repo_root) / "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)

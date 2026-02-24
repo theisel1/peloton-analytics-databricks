@@ -5,6 +5,7 @@ import hashlib
 import html
 import os
 import re
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -78,9 +79,25 @@ class PelotonClient:
         self.get_me()
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        response = self.session.get(f"{self.base_url}{path}", params=params, timeout=30)
-        response.raise_for_status()
-        return response.json()
+        retriable_statuses = {429, 500, 502, 503, 504}
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            response = self.session.get(f"{self.base_url}{path}", params=params, timeout=30)
+            if response.status_code < 400:
+                return response.json()
+
+            if response.status_code in retriable_statuses and attempt < max_attempts:
+                retry_after = response.headers.get("Retry-After")
+                if retry_after and retry_after.isdigit():
+                    delay = int(retry_after)
+                else:
+                    delay = 2 ** (attempt - 1)
+                time.sleep(min(delay, 30))
+                continue
+
+            response.raise_for_status()
+
+        raise RuntimeError("Peloton GET request failed without a specific exception.")
 
     def _generate_random_string(self, length: int) -> str:
         raw = base64.urlsafe_b64encode(os.urandom(length)).decode("utf-8")

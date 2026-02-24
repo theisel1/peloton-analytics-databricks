@@ -1,21 +1,38 @@
 {
-  "name": "Peloton Lakehouse Demo Pipeline",
+  "name": "Peloton Lakehouse Pipeline",
   "max_concurrent_runs": 1,
+  "environments": [
+    {
+      "environment_key": "default",
+      "spec": {
+        "client": "2",
+        "dependencies": [
+          "requests>=2.32.0",
+          "pandas>=2.2.0",
+          "pydantic>=2.7.0",
+          "pydantic-settings>=2.3.0",
+          "scikit-learn>=1.5.0",
+          "numpy>=1.26.0",
+          "joblib>=1.4.0"
+        ]
+      }
+    }
+  ],
   "tasks": [
     {
       "task_key": "01_setup",
+      "environment_key": "default",
       "notebook_task": {
-        "notebook_path": "/Workspace/Repos/<user>/peloton-analytics-databricks/databricks/notebooks/00_setup.py",
+        "notebook_path": "/Users/<user>/peloton-analytics-databricks/databricks/notebooks/00_setup",
         "base_parameters": {
-          "repo_root": "/Workspace/Repos/<user>/peloton-analytics-databricks",
+          "repo_root": "/Users/<user>/peloton-analytics-databricks",
           "catalog": "main",
           "schema": "fitness",
           "artifact_base_path": "/dbfs/FileStore/peloton_analytics",
           "peloton_since": "",
           "peloton_max_workouts": "150"
         }
-      },
-      "existing_cluster_id": "<set-existing-cluster-id>"
+      }
     },
     {
       "task_key": "02_ingestion",
@@ -24,17 +41,19 @@
           "task_key": "01_setup"
         }
       ],
+      "environment_key": "default",
       "notebook_task": {
-        "notebook_path": "/Workspace/Repos/<user>/peloton-analytics-databricks/databricks/notebooks/01_data_ingestion.py",
+        "notebook_path": "/Users/<user>/peloton-analytics-databricks/databricks/notebooks/01_data_ingestion",
         "base_parameters": {
-          "repo_root": "/Workspace/Repos/<user>/peloton-analytics-databricks",
+          "repo_root": "/Users/<user>/peloton-analytics-databricks",
           "catalog": "main",
           "schema": "fitness",
           "peloton_since": "",
-          "peloton_max_workouts": "150"
+          "peloton_max_workouts": "150",
+          "peloton_username": "",
+          "peloton_password": ""
         }
-      },
-      "existing_cluster_id": "<set-existing-cluster-id>"
+      }
     },
     {
       "task_key": "03_governance",
@@ -43,14 +62,14 @@
           "task_key": "02_ingestion"
         }
       ],
+      "environment_key": "default",
       "notebook_task": {
-        "notebook_path": "/Workspace/Repos/<user>/peloton-analytics-databricks/databricks/notebooks/02_data_governance.py",
+        "notebook_path": "/Users/<user>/peloton-analytics-databricks/databricks/notebooks/02_data_governance",
         "base_parameters": {
           "catalog": "main",
           "schema": "fitness"
         }
-      },
-      "existing_cluster_id": "<set-existing-cluster-id>"
+      }
     },
     {
       "task_key": "04_bi",
@@ -59,15 +78,15 @@
           "task_key": "03_governance"
         }
       ],
+      "environment_key": "default",
       "notebook_task": {
-        "notebook_path": "/Workspace/Repos/<user>/peloton-analytics-databricks/databricks/notebooks/03_bi.py",
+        "notebook_path": "/Users/<user>/peloton-analytics-databricks/databricks/notebooks/03_bi",
         "base_parameters": {
-          "repo_root": "/Workspace/Repos/<user>/peloton-analytics-databricks",
+          "repo_root": "/Users/<user>/peloton-analytics-databricks",
           "catalog": "main",
           "schema": "fitness"
         }
-      },
-      "existing_cluster_id": "<set-existing-cluster-id>"
+      }
     },
     {
       "task_key": "05_ml",
@@ -76,16 +95,16 @@
           "task_key": "04_bi"
         }
       ],
+      "environment_key": "default",
       "notebook_task": {
-        "notebook_path": "/Workspace/Repos/<user>/peloton-analytics-databricks/databricks/notebooks/04_ml.py",
+        "notebook_path": "/Users/<user>/peloton-analytics-databricks/databricks/notebooks/04_ml",
         "base_parameters": {
-          "repo_root": "/Workspace/Repos/<user>/peloton-analytics-databricks",
+          "repo_root": "/Users/<user>/peloton-analytics-databricks",
           "catalog": "main",
           "schema": "fitness",
           "artifact_base_path": "/dbfs/FileStore/peloton_analytics"
         }
-      },
-      "existing_cluster_id": "<set-existing-cluster-id>"
+      }
     }
   ]
 }

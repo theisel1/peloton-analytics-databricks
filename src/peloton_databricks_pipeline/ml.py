@@ -3,12 +3,27 @@ from __future__ import annotations
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
+
+
+def _ensure_artifact_paths(model_dir: Path, report_path: Path) -> tuple[Path, Path]:
+    try:
+        model_dir.mkdir(parents=True, exist_ok=True)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        return model_dir, report_path
+    except OSError:
+        fallback_root = Path("/tmp/peloton_analytics")
+        fallback_model_dir = fallback_root / "models"
+        fallback_report_path = fallback_root / "reports" / "insights.md"
+        fallback_model_dir.mkdir(parents=True, exist_ok=True)
+        fallback_report_path.parent.mkdir(parents=True, exist_ok=True)
+        return fallback_model_dir, fallback_report_path
 
 
 def train_and_generate_insights(
@@ -90,8 +105,7 @@ def train_and_generate_insights(
 
     importances = pd.Series(regressor.feature_importances_, index=feature_columns).sort_values(ascending=False)
 
-    model_dir.mkdir(parents=True, exist_ok=True)
-    report_path.parent.mkdir(parents=True, exist_ok=True)
+    model_dir, report_path = _ensure_artifact_paths(model_dir=model_dir, report_path=report_path)
 
     joblib.dump({"model": regressor, "imputer": imputer, "features": feature_columns}, model_dir / "peloton_work_model.joblib")
     cluster_summary.to_csv(model_dir / "cluster_summary.csv")

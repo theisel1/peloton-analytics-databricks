@@ -19,15 +19,27 @@ dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("schema", "fitness")
 dbutils.widgets.text("peloton_since", "")
 dbutils.widgets.text("peloton_max_workouts", "150")
+dbutils.widgets.text("peloton_username", "")
+dbutils.widgets.text("peloton_password", "")
 
 repo_root = dbutils.widgets.get("repo_root")
 catalog = dbutils.widgets.get("catalog")
 schema = dbutils.widgets.get("schema")
 peloton_since = dbutils.widgets.get("peloton_since")
 peloton_max_workouts = dbutils.widgets.get("peloton_max_workouts")
+peloton_username = dbutils.widgets.get("peloton_username")
+peloton_password = dbutils.widgets.get("peloton_password")
 
 # COMMAND ----------
 
+def _normalize_workspace_root(path: str) -> str:
+    if path.startswith("/Workspace/"):
+        return path
+    if path.startswith("/Users/") or path.startswith("/Repos/"):
+        return f"/Workspace{path}"
+    return path
+
+repo_root = _normalize_workspace_root(repo_root)
 src_path = str(Path(repo_root) / "src")
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
@@ -41,6 +53,10 @@ if peloton_since:
     os.environ["PELOTON_SINCE"] = peloton_since
 if peloton_max_workouts:
     os.environ["PELOTON_MAX_WORKOUTS"] = peloton_max_workouts
+if peloton_username:
+    os.environ["PELOTON_USERNAME"] = peloton_username
+if peloton_password:
+    os.environ["PELOTON_PASSWORD"] = peloton_password
 
 # COMMAND ----------
 

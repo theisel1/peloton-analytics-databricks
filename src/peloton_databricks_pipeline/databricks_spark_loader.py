@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Iterable
 from uuid import uuid4
 
 import pandas as pd
 from pyspark.sql import SparkSession
+from pyspark.sql.types import (
+    BooleanType,
+    ByteType,
+    DateType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegerType,
+    LongType,
+    ShortType,
+    StringType,
+    TimestampType,
+)
 
 
 class DatabricksSparkLoader:
@@ -24,6 +38,42 @@ class DatabricksSparkLoader:
 
     def table_name(self, table: str) -> str:
         return self._table_name(table)
+
+    def _coerce_for_spark_type(self, value: object | None, data_type: object) -> object | None:
+        if value is None:
+            return None
+
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+
+        try:
+            if isinstance(data_type, StringType):
+                return str(value)
+            if isinstance(data_type, (DoubleType, FloatType, DecimalType)):
+                return float(value)
+            if isinstance(data_type, (LongType, IntegerType, ShortType, ByteType)):
+                return int(value)
+            if isinstance(data_type, BooleanType):
+                return bool(value)
+            if isinstance(data_type, TimestampType):
+                if isinstance(value, datetime):
+                    return value
+                if isinstance(value, str):
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if isinstance(data_type, DateType):
+                if isinstance(value, date):
+                    return value
+                if isinstance(value, datetime):
+                    return value.date()
+                if isinstance(value, str):
+                    return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except Exception:
+            return value
+
+        return value
 
     def ensure_schema_and_tables(self) -> None:
         self.spark.sql(f"CREATE SCHEMA IF NOT EXISTS {self._q(self.catalog)}.{self._q(self.schema)}")
@@ -68,13 +118,26 @@ class DatabricksSparkLoader:
         if df.empty:
             return
 
-        prepared = df.where(pd.notna(df), None)
-        spark_df = self.spark.createDataFrame(prepared)
+        target_table = self._table_name(table)
+        target_schema = self.spark.table(target_table).schema
+
+        # Spark Connect + pandas can fail on Arrow-backed columns (ChunkedArray).
+        # Convert rows to plain Python scalars before creating a Spark DataFrame.
+        records: list[tuple[object | None, ...]] = []
+        for row in df.to_dict(orient="records"):
+            coerced_row = tuple(
+                self._coerce_for_spark_type(row.get(field.name), field.dataType) for field in target_schema.fields
+            )
+            records.append(coerced_row)
+
+        if not records:
+            return
+
+        spark_df = self.spark.createDataFrame(records, schema=target_schema)
 
         staging_view = f"peloton_staging_{uuid4().hex[:8]}"
         spark_df.createOrReplaceTempView(staging_view)
 
-        target_table = self._table_name(table)
         columns = spark_df.columns
 
         on_clause = " AND ".join([f"t.{self._q(col)} <=> s.{self._q(col)}" for col in key_columns])
