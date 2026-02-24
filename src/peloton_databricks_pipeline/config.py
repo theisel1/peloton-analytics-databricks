@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         default="/dbfs/FileStore/peloton_analytics",
         alias="DATABRICKS_ARTIFACT_BASE_PATH",
     )
+    mlflow_enabled: bool = Field(default=True, alias="MLFLOW_ENABLED")
+    mlflow_experiment_name: str | None = Field(default=None, alias="MLFLOW_EXPERIMENT_NAME")
+    mlflow_run_name: str | None = Field(default=None, alias="MLFLOW_RUN_NAME")
+    mlflow_registered_model_name: str | None = Field(default=None, alias="MLFLOW_REGISTERED_MODEL_NAME")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

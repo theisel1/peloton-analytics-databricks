@@ -132,7 +132,7 @@ def run_load(
     loader.load(workouts_df=workouts_df, metrics_df=metrics_df)
 
 
-def run_train(use_spark_loader: bool = False, model_base_path: str | None = None) -> dict[str, float | int]:
+def run_train(use_spark_loader: bool = False, model_base_path: str | None = None) -> dict[str, object]:
     settings = get_settings()
     loader = _build_loader(settings, force_spark_loader=use_spark_loader)
     training_df = loader.read_training_frame()
@@ -151,6 +151,10 @@ def run_train(use_spark_loader: bool = False, model_base_path: str | None = None
         training_df,
         model_dir=model_dir,
         report_path=report_path,
+        enable_mlflow=settings.mlflow_enabled,
+        mlflow_experiment_name=settings.mlflow_experiment_name,
+        mlflow_run_name=settings.mlflow_run_name,
+        mlflow_registered_model_name=settings.mlflow_registered_model_name,
     )
 
 
@@ -158,7 +162,7 @@ def run_all(
     use_spark_loader: bool = False,
     write_local_staging: bool | None = None,
     model_base_path: str | None = None,
-) -> dict[str, float | int]:
+) -> dict[str, object]:
     settings = get_settings()
     if _should_use_spark_loader(settings, use_spark_loader):
         return run_lakehouse(
@@ -174,7 +178,7 @@ def run_all(
 def run_lakehouse(
     write_local_staging: bool | None = None,
     model_base_path: str | None = None,
-) -> dict[str, float | int]:
+) -> dict[str, object]:
     settings = get_settings()
     try:
         from .databricks_spark_loader import DatabricksSparkLoader
@@ -210,6 +214,10 @@ def run_lakehouse(
         "mae": float(train_result["mae"]),
         "r2": float(train_result["r2"]),
         "cluster_count": int(train_result["cluster_count"]),
+        "artifact_model_dir": train_result.get("artifact_model_dir"),
+        "artifact_report_path": train_result.get("artifact_report_path"),
+        "mlflow_status": train_result.get("mlflow_status"),
+        "mlflow_run_id": train_result.get("mlflow_run_id"),
     }
 
 

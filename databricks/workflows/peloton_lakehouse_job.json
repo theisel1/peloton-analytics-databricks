@@ -13,7 +13,8 @@
           "pydantic-settings>=2.3.0",
           "scikit-learn>=1.5.0",
           "numpy>=1.26.0",
-          "joblib>=1.4.0"
+          "joblib>=1.4.0",
+          "mlflow>=2.16.0"
         ]
       }
     }
@@ -50,8 +51,9 @@
           "schema": "fitness",
           "peloton_since": "",
           "peloton_max_workouts": "150",
-          "peloton_username": "",
-          "peloton_password": ""
+          "peloton_secret_scope": "peloton",
+          "peloton_username_key": "username",
+          "peloton_password_key": "password"
         }
       }
     },
@@ -102,7 +104,11 @@
           "repo_root": "/Users/<user>/peloton-analytics-databricks",
           "catalog": "main",
           "schema": "fitness",
-          "artifact_base_path": "/dbfs/FileStore/peloton_analytics"
+          "artifact_base_path": "/dbfs/FileStore/peloton_analytics",
+          "mlflow_enabled": "true",
+          "mlflow_experiment_name": "/Users/<user>/peloton-analytics",
+          "mlflow_run_name": "peloton-ml-training",
+          "mlflow_registered_model_name": ""
         }
       }
     }

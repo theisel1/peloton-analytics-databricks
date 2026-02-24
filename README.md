@@ -42,11 +42,21 @@ It is designed to run inside Databricks and write directly to Delta tables, with
 
 ## Run In Databricks (Recommended)
 
-### 1. Configure secrets/env for the job
+### 1. Configure Databricks secrets for Peloton credentials
 
-Required:
-- `PELOTON_USERNAME`
-- `PELOTON_PASSWORD`
+Create a Databricks secret scope and keys used by the ingestion notebook:
+- scope: `peloton`
+- key: `username`
+- key: `password`
+
+The workflow reads these via job parameters:
+- `peloton_secret_scope=peloton`
+- `peloton_username_key=username`
+- `peloton_password_key=password`
+
+Do not store plaintext credentials in job parameters.
+
+### 2. Configure runtime settings
 
 Recommended:
 - `USE_DATABRICKS_SPARK=true`
@@ -56,8 +66,12 @@ Recommended:
 - `DATABRICKS_ARTIFACT_BASE_PATH=/dbfs/FileStore/peloton_analytics`
 - `PELOTON_MAX_WORKOUTS=150` (for a faster first run)
 - optional `PELOTON_SINCE=2025-01-01T00:00:00Z`
+- `MLFLOW_ENABLED=true`
+- `MLFLOW_EXPERIMENT_NAME=/Users/<you>/peloton-analytics`
+- optional `MLFLOW_RUN_NAME=peloton-ml-training`
+- optional `MLFLOW_REGISTERED_MODEL_NAME=<model_name>`
 
-### 2. Run one of these options
+### 3. Run one of these options
 
 Notebook pipeline:
 - Run notebooks in order: `00` -> `01` -> `02` -> `03` -> `04`
@@ -66,6 +80,8 @@ Notebook pipeline:
 Single entrypoint:
 - `databricks/notebooks/05_workflow_orchestration.py`
 - `databricks/run_pipeline.py`
+
+MLflow metrics and model artifacts are logged during `04_ml.py` / `run_train`.
 
 ## CLI Commands
 

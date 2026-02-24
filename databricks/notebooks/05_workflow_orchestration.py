@@ -22,6 +22,13 @@ dbutils.widgets.text("peloton_since", "")
 dbutils.widgets.text("peloton_max_workouts", "150")
 dbutils.widgets.text("peloton_username", "")
 dbutils.widgets.text("peloton_password", "")
+dbutils.widgets.text("peloton_secret_scope", "peloton")
+dbutils.widgets.text("peloton_username_key", "username")
+dbutils.widgets.text("peloton_password_key", "password")
+dbutils.widgets.text("mlflow_enabled", "true")
+dbutils.widgets.text("mlflow_experiment_name", "")
+dbutils.widgets.text("mlflow_run_name", "peloton-lakehouse-train")
+dbutils.widgets.text("mlflow_registered_model_name", "")
 
 repo_root = dbutils.widgets.get("repo_root")
 catalog = dbutils.widgets.get("catalog")
@@ -31,6 +38,13 @@ peloton_since = dbutils.widgets.get("peloton_since")
 peloton_max_workouts = dbutils.widgets.get("peloton_max_workouts")
 peloton_username = dbutils.widgets.get("peloton_username")
 peloton_password = dbutils.widgets.get("peloton_password")
+peloton_secret_scope = dbutils.widgets.get("peloton_secret_scope").strip()
+peloton_username_key = dbutils.widgets.get("peloton_username_key").strip()
+peloton_password_key = dbutils.widgets.get("peloton_password_key").strip()
+mlflow_enabled = dbutils.widgets.get("mlflow_enabled").strip()
+mlflow_experiment_name = dbutils.widgets.get("mlflow_experiment_name").strip()
+mlflow_run_name = dbutils.widgets.get("mlflow_run_name").strip()
+mlflow_registered_model_name = dbutils.widgets.get("mlflow_registered_model_name").strip()
 
 # COMMAND ----------
 
@@ -55,10 +69,42 @@ if peloton_since:
     os.environ["PELOTON_SINCE"] = peloton_since
 if peloton_max_workouts:
     os.environ["PELOTON_MAX_WORKOUTS"] = peloton_max_workouts
-if peloton_username:
-    os.environ["PELOTON_USERNAME"] = peloton_username
-if peloton_password:
-    os.environ["PELOTON_PASSWORD"] = peloton_password
+if mlflow_enabled:
+    os.environ["MLFLOW_ENABLED"] = mlflow_enabled
+if mlflow_experiment_name:
+    os.environ["MLFLOW_EXPERIMENT_NAME"] = mlflow_experiment_name
+if mlflow_run_name:
+    os.environ["MLFLOW_RUN_NAME"] = mlflow_run_name
+if mlflow_registered_model_name:
+    os.environ["MLFLOW_REGISTERED_MODEL_NAME"] = mlflow_registered_model_name
+
+
+def _resolve_secret(scope: str, key: str, label: str) -> str | None:
+    if not scope or not key:
+        return None
+    try:
+        return dbutils.secrets.get(scope=scope, key=key)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to resolve {label} from secret scope '{scope}' using key '{key}'."
+        ) from exc
+
+
+resolved_username = peloton_username or _resolve_secret(
+    peloton_secret_scope, peloton_username_key, "Peloton username"
+)
+resolved_password = peloton_password or _resolve_secret(
+    peloton_secret_scope, peloton_password_key, "Peloton password"
+)
+
+if not resolved_username or not resolved_password:
+    raise ValueError(
+        "Peloton credentials are required. Pass peloton_username/peloton_password "
+        "or configure peloton_secret_scope + secret keys."
+    )
+
+os.environ["PELOTON_USERNAME"] = resolved_username
+os.environ["PELOTON_PASSWORD"] = resolved_password
 
 from peloton_databricks_pipeline.pipeline import run_lakehouse
 
