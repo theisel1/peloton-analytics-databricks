@@ -26,6 +26,32 @@ def _ensure_artifact_paths(model_dir: Path, report_path: Path) -> tuple[Path, Pa
         return fallback_model_dir, fallback_report_path
 
 
+def _split_training_frame(
+    X: pd.DataFrame,
+    y: pd.Series,
+    timestamp_series: pd.Series | None,
+    test_size: float,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, str]:
+    if timestamp_series is not None:
+        ts = pd.to_datetime(timestamp_series, errors="coerce")
+        if len(ts) >= 8 and bool(ts.notna().all()):
+            ordered_idx = ts.sort_values().index.tolist()
+            split_at = int(len(ordered_idx) * (1 - test_size))
+            split_at = max(2, min(split_at, len(ordered_idx) - 2))
+            train_idx = ordered_idx[:split_at]
+            test_idx = ordered_idx[split_at:]
+            return (
+                X.loc[train_idx],
+                X.loc[test_idx],
+                y.loc[train_idx],
+                y.loc[test_idx],
+                "time_ordered",
+            )
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    return X_train, X_test, y_train, y_test, "random"
+
+
 def _log_mlflow_artifacts(
     *,
     enable_mlflow: bool,
@@ -41,6 +67,11 @@ def _log_mlflow_artifacts(
     rows_used_for_training: int,
     mae: float,
     r2: float,
+    baseline_mae: float,
+    baseline_r2: float,
+    mae_improvement_vs_baseline: float,
+    r2_improvement_vs_baseline: float,
+    split_type: str,
     cluster_count: int,
 ) -> tuple[str, str | None]:
     if not enable_mlflow:
@@ -70,12 +101,17 @@ def _log_mlflow_artifacts(
                     "train_rows": rows_used_for_training,
                     "feature_count": len(feature_columns),
                     "cluster_count": cluster_count,
+                    "split_type": split_type,
                 }
             )
             mlflow.log_metrics(
                 {
                     "mae": mae,
                     "r2": r2,
+                    "baseline_mae": baseline_mae,
+                    "baseline_r2": baseline_r2,
+                    "mae_improvement_vs_baseline": mae_improvement_vs_baseline,
+                    "r2_improvement_vs_baseline": r2_improvement_vs_baseline,
                 }
             )
             for feature_name, importance in importances.items():
@@ -134,14 +170,20 @@ def train_and_generate_insights(
 
     X = usable[feature_columns].copy()
     y = usable[target_column]
+    timestamp_series = training_df.loc[usable.index, "created_at"] if "created_at" in training_df.columns else None
     for column in feature_columns:
         if X[column].notna().sum() == 0:
             X.loc[:, column] = 0.0
 
+    X_train_raw, X_test_raw, y_train, y_test, split_type = _split_training_frame(
+        X=X,
+        y=y,
+        timestamp_series=timestamp_series,
+        test_size=0.25,
+    )
     imputer = SimpleImputer(strategy="median")
-    X_imputed = imputer.fit_transform(X)
-
-    X_train, X_test, y_train, y_test = train_test_split(X_imputed, y, test_size=0.25, random_state=42)
+    X_train = imputer.fit_transform(X_train_raw)
+    X_test = imputer.transform(X_test_raw)
 
     regressor = RandomForestRegressor(n_estimators=300, random_state=42)
     regressor.fit(X_train, y_train)
@@ -149,6 +191,11 @@ def train_and_generate_insights(
 
     mae = float(mean_absolute_error(y_test, y_pred))
     r2 = float(r2_score(y_test, y_pred))
+    baseline_pred = np.full(shape=len(y_test), fill_value=float(y_train.mean()))
+    baseline_mae = float(mean_absolute_error(y_test, baseline_pred))
+    baseline_r2 = float(r2_score(y_test, baseline_pred))
+    mae_improvement_vs_baseline = baseline_mae - mae
+    r2_improvement_vs_baseline = r2 - baseline_r2
 
     kmeans_features = ["ride_duration", "avg_heart_rate", "avg_output", "avg_resistance"]
     for column in kmeans_features:
@@ -193,8 +240,14 @@ def train_and_generate_insights(
     with report_path.open("w", encoding="utf-8") as f:
         f.write("# Peloton ML Insights\n\n")
         f.write("## Model Quality\n")
+        f.write(f"- Split strategy: {split_type}\n")
         f.write(f"- MAE (total_work prediction): {mae:.2f}\n")
         f.write(f"- R^2: {r2:.3f}\n\n")
+        f.write("## Baseline Comparison\n")
+        f.write(f"- Baseline MAE (mean predictor): {baseline_mae:.2f}\n")
+        f.write(f"- Baseline R^2: {baseline_r2:.3f}\n")
+        f.write(f"- MAE improvement vs baseline: {mae_improvement_vs_baseline:.2f}\n")
+        f.write(f"- R^2 improvement vs baseline: {r2_improvement_vs_baseline:.3f}\n\n")
         f.write("## Top Predictors of Workout Output\n")
         for feature, importance in importances.items():
             f.write(f"- {feature}: {importance:.3f}\n")
@@ -216,6 +269,11 @@ def train_and_generate_insights(
         rows_used_for_training=int(len(usable)),
         mae=mae,
         r2=r2,
+        baseline_mae=baseline_mae,
+        baseline_r2=baseline_r2,
+        mae_improvement_vs_baseline=mae_improvement_vs_baseline,
+        r2_improvement_vs_baseline=r2_improvement_vs_baseline,
+        split_type=split_type,
         cluster_count=int(n_clusters),
     )
 
@@ -223,6 +281,11 @@ def train_and_generate_insights(
         "rows_used_for_training": int(len(usable)),
         "mae": mae,
         "r2": r2,
+        "baseline_mae": baseline_mae,
+        "baseline_r2": baseline_r2,
+        "mae_improvement_vs_baseline": mae_improvement_vs_baseline,
+        "r2_improvement_vs_baseline": r2_improvement_vs_baseline,
+        "split_type": split_type,
         "cluster_count": int(n_clusters),
         "artifact_model_dir": str(model_dir),
         "artifact_report_path": str(report_path),

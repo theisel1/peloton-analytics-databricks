@@ -82,6 +82,11 @@ Single entrypoint:
 - `databricks/run_pipeline.py`
 
 MLflow metrics and model artifacts are logged during `04_ml.py` / `run_train`.
+Logged quality metrics include:
+- `mae`, `r2`
+- `baseline_mae`, `baseline_r2`
+- `mae_improvement_vs_baseline`, `r2_improvement_vs_baseline`
+- `split_type` (`time_ordered` when timestamps are available, otherwise `random`)
 
 ## CLI Commands
 
