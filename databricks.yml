@@ -1,0 +1,59 @@
+bundle:
+  name: peloton-analytics-databricks
+
+include:
+  - databricks/resources/*.yml
+
+sync:
+  exclude:
+    - .git/**
+    - .venv/**
+    - data/**
+    - models/**
+    - reports/**
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+
+variables:
+  catalog:
+    default: main
+  schema:
+    default: fitness
+  artifact_base_path:
+    default: /dbfs/FileStore/peloton_analytics
+  peloton_since:
+    default: ""
+  peloton_max_workouts:
+    default: "150"
+  peloton_secret_scope:
+    default: peloton
+  peloton_username_key:
+    default: username
+  peloton_password_key:
+    default: password
+  mlflow_enabled:
+    default: "true"
+  mlflow_run_name:
+    default: peloton-ml-training
+  mlflow_registered_model_name:
+    default: ""
+
+targets:
+  dev:
+    default: true
+    workspace:
+      host: https://dbc-54d93db1-cc72.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      jobs:
+        peloton_lakehouse_pipeline:
+          name: Peloton Lakehouse Pipeline (dev)
+
+  prod:
+    workspace:
+      host: https://dbc-54d93db1-cc72.cloud.databricks.com
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      jobs:
+        peloton_lakehouse_pipeline:
+          name: Peloton Lakehouse Pipeline

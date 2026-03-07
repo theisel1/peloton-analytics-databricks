@@ -71,7 +71,29 @@ Recommended:
 - optional `MLFLOW_RUN_NAME=peloton-ml-training`
 - optional `MLFLOW_REGISTERED_MODEL_NAME=<model_name>`
 
-### 3. Run one of these options
+### 3. Deploy with Databricks Asset Bundle (recommended)
+
+Bundle files:
+- `databricks.yml`
+- `databricks/resources/peloton_lakehouse_pipeline.yml`
+
+Use the Databricks CLI bundle workflow:
+
+```bash
+databricks bundle validate -t dev
+databricks bundle deploy -t dev
+databricks bundle run -t dev peloton_lakehouse_pipeline
+```
+
+For production:
+
+```bash
+databricks bundle validate -t prod
+databricks bundle deploy -t prod
+databricks bundle run -t prod peloton_lakehouse_pipeline
+```
+
+### 4. Alternate run options
 
 Notebook pipeline:
 - Run notebooks in order: `00` -> `01` -> `02` -> `03` -> `04`

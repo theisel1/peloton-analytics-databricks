@@ -1,0 +1,88 @@
+resources:
+  jobs:
+    peloton_lakehouse_pipeline:
+      name: Peloton Lakehouse Pipeline
+      max_concurrent_runs: 1
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+            dependencies:
+              - requests>=2.32.0
+              - pandas>=2.2.0
+              - pydantic>=2.7.0
+              - pydantic-settings>=2.3.0
+              - scikit-learn>=1.5.0
+              - numpy>=1.26.0
+              - joblib>=1.4.0
+              - mlflow>=2.16.0
+      tasks:
+        - task_key: 01_setup
+          environment_key: default
+          notebook_task:
+            notebook_path: ../notebooks/00_setup.py
+            source: WORKSPACE
+            base_parameters:
+              repo_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              artifact_base_path: ${var.artifact_base_path}
+              peloton_since: ${var.peloton_since}
+              peloton_max_workouts: ${var.peloton_max_workouts}
+
+        - task_key: 02_ingestion
+          environment_key: default
+          depends_on:
+            - task_key: 01_setup
+          notebook_task:
+            notebook_path: ../notebooks/01_data_ingestion.py
+            source: WORKSPACE
+            base_parameters:
+              repo_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              peloton_since: ${var.peloton_since}
+              peloton_max_workouts: ${var.peloton_max_workouts}
+              peloton_secret_scope: ${var.peloton_secret_scope}
+              peloton_username_key: ${var.peloton_username_key}
+              peloton_password_key: ${var.peloton_password_key}
+
+        - task_key: 03_governance
+          environment_key: default
+          depends_on:
+            - task_key: 02_ingestion
+          notebook_task:
+            notebook_path: ../notebooks/02_data_governance.py
+            source: WORKSPACE
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+
+        - task_key: 04_bi
+          environment_key: default
+          depends_on:
+            - task_key: 03_governance
+          notebook_task:
+            notebook_path: ../notebooks/03_bi.py
+            source: WORKSPACE
+            base_parameters:
+              repo_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+
+        - task_key: 05_ml
+          environment_key: default
+          depends_on:
+            - task_key: 04_bi
+          notebook_task:
+            notebook_path: ../notebooks/04_ml.py
+            source: WORKSPACE
+            base_parameters:
+              repo_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              artifact_base_path: ${var.artifact_base_path}
+              mlflow_enabled: ${var.mlflow_enabled}
+              mlflow_experiment_name: /Users/${workspace.current_user.userName}/peloton-analytics
+              mlflow_run_name: ${var.mlflow_run_name}
+              mlflow_registered_model_name: ${var.mlflow_registered_model_name}
