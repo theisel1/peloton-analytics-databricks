@@ -8,5 +8,6 @@ __all__ = [
     "databricks_spark_loader",
     "lakehouse",
     "ml",
+    "scoring",
     "pipeline",
 ]

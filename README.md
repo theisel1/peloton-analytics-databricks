@@ -35,6 +35,7 @@ It is designed to run inside Databricks and write directly to Delta tables, with
 - `databricks/notebooks/03_bi.py`
 - `databricks/notebooks/04_ml.py`
 - `databricks/notebooks/05_workflow_orchestration.py`
+- `databricks/notebooks/06_scoring.py`
 
 ### Workflow definition
 
@@ -76,6 +77,7 @@ Recommended:
 Bundle files:
 - `databricks.yml`
 - `databricks/resources/peloton_lakehouse_pipeline.yml`
+- `databricks/resources/peloton_workout_scoring.yml`
 
 Use the Databricks CLI bundle workflow:
 
@@ -83,6 +85,7 @@ Use the Databricks CLI bundle workflow:
 databricks bundle validate -t dev
 databricks bundle deploy -t dev
 databricks bundle run -t dev peloton_lakehouse_pipeline
+databricks bundle run -t dev peloton_workout_scoring
 ```
 
 For production:
@@ -91,6 +94,7 @@ For production:
 databricks bundle validate -t prod
 databricks bundle deploy -t prod
 databricks bundle run -t prod peloton_lakehouse_pipeline
+databricks bundle run -t prod peloton_workout_scoring
 ```
 
 ### 4. Alternate run options
@@ -109,6 +113,10 @@ Logged quality metrics include:
 - `baseline_mae`, `baseline_r2`
 - `mae_improvement_vs_baseline`, `r2_improvement_vs_baseline`
 - `split_type` (`time_ordered` when timestamps are available, otherwise `random`)
+
+Scoring output:
+- batch scoring writes predictions to `main.fitness.gold_peloton_total_work_predictions`
+- single scoring mode in `06_scoring.py` predicts from widget inputs
 
 ## CLI Commands
 

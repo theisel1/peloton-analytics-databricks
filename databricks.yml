@@ -48,6 +48,8 @@ targets:
       jobs:
         peloton_lakehouse_pipeline:
           name: Peloton Lakehouse Pipeline (dev)
+        peloton_workout_scoring:
+          name: Peloton Workout Scoring (dev)
 
   prod:
     workspace:
@@ -57,3 +59,5 @@ targets:
       jobs:
         peloton_lakehouse_pipeline:
           name: Peloton Lakehouse Pipeline
+        peloton_workout_scoring:
+          name: Peloton Workout Scoring

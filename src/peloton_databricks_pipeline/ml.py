@@ -554,6 +554,7 @@ def train_and_generate_insights(
         {
             "stage1_classifier": stage1_classifier_pipeline,
             "stage2_regressor": stage2_regressor_pipeline,
+            "stage1_threshold": stage1_threshold,
             "features_numeric": feature_columns,
             "feature_discipline": discipline_column,
             "discipline_bucket_min_rows": min_discipline_rows,
