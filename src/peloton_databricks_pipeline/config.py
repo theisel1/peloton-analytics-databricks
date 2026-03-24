@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     mlflow_experiment_name: str | None = Field(default=None, alias="MLFLOW_EXPERIMENT_NAME")
     mlflow_run_name: str | None = Field(default=None, alias="MLFLOW_RUN_NAME")
     mlflow_registered_model_name: str | None = Field(default=None, alias="MLFLOW_REGISTERED_MODEL_NAME")
+    mlflow_model_alias: str = Field(default="Champion", alias="MLFLOW_MODEL_ALIAS")
+    optuna_enabled: bool = Field(default=False, alias="OPTUNA_ENABLED")
+    optuna_trials: int = Field(default=20, alias="OPTUNA_TRIALS")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

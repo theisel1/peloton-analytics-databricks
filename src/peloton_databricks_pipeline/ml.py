@@ -63,6 +63,35 @@ def _make_one_hot_encoder() -> OneHotEncoder:
         return OneHotEncoder(handle_unknown="ignore", sparse=False)
 
 
+def _build_validation_split(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    split_type: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series] | None:
+    n_rows = len(X_train)
+    if n_rows < 40:
+        return None
+
+    val_rows = max(8, int(n_rows * 0.2))
+    val_rows = min(val_rows, n_rows - 8)
+    if val_rows < 8:
+        return None
+
+    if split_type == "time_ordered":
+        ordered_idx = list(X_train.index)
+    else:
+        ordered_idx = list(X_train.sample(frac=1.0, random_state=42).index)
+
+    train_idx = ordered_idx[:-val_rows]
+    val_idx = ordered_idx[-val_rows:]
+    return (
+        X_train.loc[train_idx],
+        X_train.loc[val_idx],
+        y_train.loc[train_idx],
+        y_train.loc[val_idx],
+    )
+
+
 def _build_preprocessor(feature_columns: list[str], discipline_column: str) -> ColumnTransformer:
     return ColumnTransformer(
         transformers=[
@@ -90,6 +119,59 @@ def _sanitize_mlflow_key(raw_key: str) -> str:
         else:
             allowed.append("_")
     return "".join(allowed).strip().replace(" ", "_")
+
+
+def _build_stage1_pipeline(
+    *,
+    feature_columns: list[str],
+    discipline_column: str,
+    n_estimators: int = 300,
+    max_depth: int | None = None,
+    min_samples_leaf: int = 1,
+    min_samples_split: int = 2,
+    max_features: str | float | None = "sqrt",
+) -> Pipeline:
+    classifier = RandomForestClassifier(
+        n_estimators=n_estimators,
+        random_state=42,
+        class_weight="balanced_subsample",
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        min_samples_split=min_samples_split,
+        max_features=max_features,
+    )
+    return Pipeline(
+        steps=[
+            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
+            ("classifier", classifier),
+        ]
+    )
+
+
+def _build_stage2_pipeline(
+    *,
+    feature_columns: list[str],
+    discipline_column: str,
+    n_estimators: int = 300,
+    max_depth: int | None = None,
+    min_samples_leaf: int = 1,
+    min_samples_split: int = 2,
+    max_features: str | float | None = 1.0,
+) -> Pipeline:
+    regressor = RandomForestRegressor(
+        n_estimators=n_estimators,
+        random_state=42,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        min_samples_split=min_samples_split,
+        max_features=max_features,
+    )
+    return Pipeline(
+        steps=[
+            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
+            ("regressor", regressor),
+        ]
+    )
 
 
 def _bucket_disciplines(
@@ -139,81 +221,27 @@ def _assemble_two_stage_predictions(
     return combined
 
 
-def _tune_stage1_threshold(
+def _search_best_threshold(
     *,
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    feature_columns: list[str],
-    discipline_column: str,
-    split_type: str,
-) -> tuple[float, float | None, float | None]:
-    n_rows = len(X_train)
-    if n_rows < 40:
-        return 0.5, None, None
-
-    val_rows = max(8, int(n_rows * 0.2))
-    val_rows = min(val_rows, n_rows - 8)
-    if val_rows < 8:
-        return 0.5, None, None
-
-    if split_type == "time_ordered":
-        ordered_idx = list(X_train.index)
-    else:
-        ordered_idx = list(X_train.sample(frac=1.0, random_state=42).index)
-
-    train_idx = ordered_idx[:-val_rows]
-    val_idx = ordered_idx[-val_rows:]
-    X_fit = X_train.loc[train_idx]
-    y_fit = y_train.loc[train_idx]
-    X_val = X_train.loc[val_idx]
-    y_val = y_train.loc[val_idx]
-
-    y_fit_positive = (y_fit > 0).astype(int)
-    positive_rows_fit = int((y_fit > 0).sum())
-    if positive_rows_fit < 8:
-        return 0.5, None, None
-
-    stage1_tune = Pipeline(
-        steps=[
-            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=300,
-                    random_state=42,
-                    class_weight="balanced_subsample",
-                ),
-            ),
-        ]
-    )
-    stage1_tune.fit(X_fit, y_fit_positive)
-
-    stage2_tune = Pipeline(
-        steps=[
-            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
-            ("regressor", RandomForestRegressor(n_estimators=300, random_state=42)),
-        ]
-    )
-    stage2_tune.fit(X_fit.loc[y_fit > 0], y_fit.loc[y_fit > 0])
-
-    positive_probabilities = pd.Series(stage1_tune.predict_proba(X_val)[:, 1], index=X_val.index)
-    stage2_predictions = pd.Series(np.maximum(stage2_tune.predict(X_val), 0.0), index=X_val.index)
-
-    # Conservative threshold search to control false positives on zero-heavy holdouts.
-    thresholds = np.linspace(0.5, 0.95, 10)
+    positive_probabilities: pd.Series,
+    stage2_predictions: pd.Series,
+    y_true: pd.Series,
+    thresholds: np.ndarray | None = None,
+) -> tuple[float, float, float | None]:
+    threshold_grid = thresholds if thresholds is not None else np.linspace(0.5, 0.95, 10)
     best_threshold = 0.5
     best_mae = float("inf")
     best_r2 = float("-inf")
 
-    for threshold in thresholds:
+    for threshold in threshold_grid:
         combined = _assemble_two_stage_predictions(
             positive_probabilities=positive_probabilities,
             stage2_predictions=stage2_predictions,
             threshold=float(threshold),
         )
-        mae = float(mean_absolute_error(y_val, combined))
-        if y_val.nunique() > 1:
-            r2 = float(r2_score(y_val, combined))
+        mae = float(mean_absolute_error(y_true, combined))
+        if y_true.nunique() > 1:
+            r2 = float(r2_score(y_true, combined))
         else:
             r2 = float("-inf")
 
@@ -224,10 +252,181 @@ def _tune_stage1_threshold(
             best_mae = mae
             best_r2 = r2
 
+    return best_threshold, best_mae, (None if not np.isfinite(best_r2) else best_r2)
+
+
+def _tune_stage1_threshold(
+    *,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    feature_columns: list[str],
+    discipline_column: str,
+    split_type: str,
+    stage1_config: dict[str, object] | None = None,
+    stage2_config: dict[str, object] | None = None,
+) -> tuple[float, float | None, float | None]:
+    validation_split = _build_validation_split(X_train, y_train, split_type)
+    if validation_split is None:
+        return 0.5, None, None
+
+    X_fit, X_val, y_fit, y_val = validation_split
+
+    y_fit_positive = (y_fit > 0).astype(int)
+    positive_rows_fit = int((y_fit > 0).sum())
+    if positive_rows_fit < 8:
+        return 0.5, None, None
+
+    stage1_tune = _build_stage1_pipeline(
+        feature_columns=feature_columns,
+        discipline_column=discipline_column,
+        **(stage1_config or {}),
+    )
+    stage1_tune.fit(X_fit, y_fit_positive)
+
+    stage2_tune = _build_stage2_pipeline(
+        feature_columns=feature_columns,
+        discipline_column=discipline_column,
+        **(stage2_config or {}),
+    )
+    stage2_tune.fit(X_fit.loc[y_fit > 0], y_fit.loc[y_fit > 0])
+
+    positive_probabilities = pd.Series(stage1_tune.predict_proba(X_val)[:, 1], index=X_val.index)
+    stage2_predictions = pd.Series(np.maximum(stage2_tune.predict(X_val), 0.0), index=X_val.index)
+    best_threshold, best_mae, best_r2 = _search_best_threshold(
+        positive_probabilities=positive_probabilities,
+        stage2_predictions=stage2_predictions,
+        y_true=y_val,
+    )
+
     if not np.isfinite(best_mae):
         return 0.5, None, None
 
-    return best_threshold, best_mae, (None if not np.isfinite(best_r2) else best_r2)
+    return best_threshold, best_mae, best_r2
+
+
+def _run_optuna_tuning(
+    *,
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    feature_columns: list[str],
+    discipline_column: str,
+    split_type: str,
+    optuna_enabled: bool,
+    optuna_trials: int,
+) -> tuple[dict[str, object], dict[str, object], float | None, dict[str, object]]:
+    default_stage1 = {
+        "n_estimators": 300,
+        "max_depth": None,
+        "min_samples_leaf": 1,
+        "min_samples_split": 2,
+        "max_features": "sqrt",
+    }
+    default_stage2 = {
+        "n_estimators": 300,
+        "max_depth": None,
+        "min_samples_leaf": 1,
+        "min_samples_split": 2,
+        "max_features": 1.0,
+    }
+    summary: dict[str, object] = {
+        "status": "disabled",
+        "trials_requested": int(optuna_trials),
+        "trials_completed": 0,
+        "best_validation_mae": None,
+        "best_validation_r2": None,
+    }
+    if not optuna_enabled or optuna_trials <= 0:
+        return default_stage1, default_stage2, None, summary
+
+    validation_split = _build_validation_split(X_train, y_train, split_type)
+    if validation_split is None:
+        summary["status"] = "skipped_insufficient_rows"
+        return default_stage1, default_stage2, None, summary
+
+    X_fit, X_val, y_fit, y_val = validation_split
+    if int((y_fit > 0).sum()) < 8:
+        summary["status"] = "skipped_insufficient_positive_rows"
+        return default_stage1, default_stage2, None, summary
+
+    try:
+        import optuna
+    except Exception:
+        summary["status"] = "unavailable"
+        return default_stage1, default_stage2, None, summary
+
+    sampler = optuna.samplers.TPESampler(seed=42)
+    study = optuna.create_study(direction="minimize", sampler=sampler)
+
+    def _objective(trial: "optuna.trial.Trial") -> float:
+        stage1_config: dict[str, object] = {
+            "n_estimators": trial.suggest_int("stage1_n_estimators", 150, 500, step=50),
+            "max_depth": trial.suggest_categorical("stage1_max_depth", [None, 6, 10, 14, 18]),
+            "min_samples_leaf": trial.suggest_int("stage1_min_samples_leaf", 1, 6),
+            "min_samples_split": trial.suggest_int("stage1_min_samples_split", 2, 12, step=2),
+            "max_features": trial.suggest_categorical("stage1_max_features", ["sqrt", "log2", None]),
+        }
+        stage2_config: dict[str, object] = {
+            "n_estimators": trial.suggest_int("stage2_n_estimators", 150, 500, step=50),
+            "max_depth": trial.suggest_categorical("stage2_max_depth", [None, 6, 10, 14, 18, 24]),
+            "min_samples_leaf": trial.suggest_int("stage2_min_samples_leaf", 1, 6),
+            "min_samples_split": trial.suggest_int("stage2_min_samples_split", 2, 12, step=2),
+            "max_features": trial.suggest_categorical("stage2_max_features", [1.0, 0.7, "sqrt", "log2"]),
+        }
+
+        stage1_tune = _build_stage1_pipeline(
+            feature_columns=feature_columns,
+            discipline_column=discipline_column,
+            **stage1_config,
+        )
+        stage1_tune.fit(X_fit, (y_fit > 0).astype(int))
+
+        stage2_tune = _build_stage2_pipeline(
+            feature_columns=feature_columns,
+            discipline_column=discipline_column,
+            **stage2_config,
+        )
+        stage2_tune.fit(X_fit.loc[y_fit > 0], y_fit.loc[y_fit > 0])
+
+        positive_probabilities = pd.Series(stage1_tune.predict_proba(X_val)[:, 1], index=X_val.index)
+        stage2_predictions = pd.Series(np.maximum(stage2_tune.predict(X_val), 0.0), index=X_val.index)
+        best_threshold, best_mae, best_r2 = _search_best_threshold(
+            positive_probabilities=positive_probabilities,
+            stage2_predictions=stage2_predictions,
+            y_true=y_val,
+        )
+        trial.set_user_attr("stage1_threshold", float(best_threshold))
+        if best_r2 is not None:
+            trial.set_user_attr("validation_r2", float(best_r2))
+        return best_mae
+
+    try:
+        study.optimize(_objective, n_trials=optuna_trials, show_progress_bar=False)
+    except Exception as exc:
+        summary["status"] = f"error:{exc.__class__.__name__}"
+        return default_stage1, default_stage2, None, summary
+
+    best_trial = study.best_trial
+    summary["status"] = "completed"
+    summary["trials_completed"] = len(study.trials)
+    summary["best_validation_mae"] = float(best_trial.value)
+    summary["best_validation_r2"] = best_trial.user_attrs.get("validation_r2")
+
+    best_stage1 = {
+        "n_estimators": int(best_trial.params["stage1_n_estimators"]),
+        "max_depth": best_trial.params["stage1_max_depth"],
+        "min_samples_leaf": int(best_trial.params["stage1_min_samples_leaf"]),
+        "min_samples_split": int(best_trial.params["stage1_min_samples_split"]),
+        "max_features": best_trial.params["stage1_max_features"],
+    }
+    best_stage2 = {
+        "n_estimators": int(best_trial.params["stage2_n_estimators"]),
+        "max_depth": best_trial.params["stage2_max_depth"],
+        "min_samples_leaf": int(best_trial.params["stage2_min_samples_leaf"]),
+        "min_samples_split": int(best_trial.params["stage2_min_samples_split"]),
+        "max_features": best_trial.params["stage2_max_features"],
+    }
+    best_threshold = float(best_trial.user_attrs.get("stage1_threshold", 0.5))
+    return best_stage1, best_stage2, best_threshold, summary
 
 
 def _log_mlflow_artifacts(
@@ -236,6 +435,7 @@ def _log_mlflow_artifacts(
     mlflow_experiment_name: str | None,
     mlflow_run_name: str | None,
     mlflow_registered_model_name: str | None,
+    mlflow_model_alias: str,
     stage1_classifier_pipeline: Pipeline,
     stage2_regressor_pipeline: Pipeline,
     classifier_n_estimators: int,
@@ -262,6 +462,14 @@ def _log_mlflow_artifacts(
     stage1_positive_rate_test: float,
     stage1_pred_positive_rate_test: float,
     stage1_threshold: float,
+    tuning_strategy: str,
+    optuna_status: str,
+    optuna_trials_requested: int,
+    optuna_trials_completed: int,
+    optuna_best_validation_mae: float | None,
+    optuna_best_validation_r2: float | None,
+    tuned_stage1_config: dict[str, object],
+    tuned_stage2_config: dict[str, object],
     threshold_tuning_mae: float | None,
     threshold_tuning_r2: float | None,
     split_type: str,
@@ -269,15 +477,15 @@ def _log_mlflow_artifacts(
     per_discipline_metrics: dict[str, dict[str, float]],
     discipline_bucket_min_rows: int,
     discipline_kept_count: int,
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, str | None]:
     if not enable_mlflow:
-        return "disabled", None
+        return "disabled", None, None
 
     try:
         import mlflow
         import mlflow.sklearn
     except Exception:
-        return "unavailable", None
+        return "unavailable", None, None
 
     try:
         if mlflow_experiment_name:
@@ -290,6 +498,7 @@ def _log_mlflow_artifacts(
             start_kwargs["nested"] = True
 
         with mlflow.start_run(**start_kwargs) as run:
+            registered_model_version: str | None = None
             mlflow.log_params(
                 {
                     "model_type": "two_stage_random_forest",
@@ -306,8 +515,22 @@ def _log_mlflow_artifacts(
                     "discipline_kept_count": discipline_kept_count,
                     "target_strategy": "stage1_zero_vs_positive_then_stage2_regression",
                     "stage1_threshold": stage1_threshold,
+                    "tuning_strategy": tuning_strategy,
+                    "optuna_status": optuna_status,
+                    "optuna_trials_requested": optuna_trials_requested,
+                    "optuna_trials_completed": optuna_trials_completed,
                 }
             )
+            for config_name, config_values in {
+                "stage1": tuned_stage1_config,
+                "stage2": tuned_stage2_config,
+            }.items():
+                mlflow.log_params(
+                    {
+                        f"{config_name}_{key}": ("none" if value is None else str(value))
+                        for key, value in config_values.items()
+                    }
+                )
             metrics_payload: dict[str, float] = {
                 "mae": mae,
                 "r2": r2,
@@ -323,6 +546,10 @@ def _log_mlflow_artifacts(
                 "stage1_positive_rate_test": stage1_positive_rate_test,
                 "stage1_pred_positive_rate_test": stage1_pred_positive_rate_test,
             }
+            if optuna_best_validation_mae is not None:
+                metrics_payload["optuna_best_validation_mae"] = optuna_best_validation_mae
+            if optuna_best_validation_r2 is not None:
+                metrics_payload["optuna_best_validation_r2"] = optuna_best_validation_r2
             if threshold_tuning_mae is not None:
                 metrics_payload["stage1_threshold_tuning_val_mae"] = threshold_tuning_mae
             if threshold_tuning_r2 is not None:
@@ -346,11 +573,14 @@ def _log_mlflow_artifacts(
 
             # Keep stage-2 regressor as the canonical sklearn model artifact.
             if mlflow_registered_model_name:
-                mlflow.sklearn.log_model(
+                model_info = mlflow.sklearn.log_model(
                     sk_model=stage2_regressor_pipeline,
                     artifact_path="model",
                     registered_model_name=mlflow_registered_model_name,
                 )
+                raw_registered_version = getattr(model_info, "registered_model_version", None)
+                if raw_registered_version is not None:
+                    registered_model_version = str(raw_registered_version)
             else:
                 mlflow.sklearn.log_model(sk_model=stage2_regressor_pipeline, artifact_path="model")
 
@@ -360,10 +590,49 @@ def _log_mlflow_artifacts(
             mlflow.log_artifact(str(model_path))
             mlflow.log_artifact(str(cluster_summary_path))
             mlflow.log_artifact(str(report_path))
-            return "logged", run.info.run_id
+
+            if mlflow_registered_model_name and mlflow_model_alias:
+                try:
+                    import time
+
+                    from mlflow.tracking import MlflowClient
+
+                    client = MlflowClient()
+                    if registered_model_version is None:
+                        for _ in range(15):
+                            versions = client.search_model_versions(
+                                f"name = '{mlflow_registered_model_name}'"
+                            )
+                            run_versions = [v for v in versions if getattr(v, "run_id", None) == run.info.run_id]
+                            if run_versions:
+                                registered_model_version = str(
+                                    max(run_versions, key=lambda item: int(str(item.version))).version
+                                )
+                                break
+                            time.sleep(1.0)
+
+                    if registered_model_version is not None:
+                        client.set_registered_model_alias(
+                            name=mlflow_registered_model_name,
+                            alias=mlflow_model_alias,
+                            version=registered_model_version,
+                        )
+                        print(
+                            "Updated model alias "
+                            f"{mlflow_model_alias} -> {mlflow_registered_model_name} v{registered_model_version}"
+                        )
+                    else:
+                        print(
+                            "Skipped alias assignment because no registered model version was found "
+                            f"for run {run.info.run_id}."
+                        )
+                except Exception as alias_exc:
+                    print(f"Alias assignment skipped due to error: {alias_exc}")
+
+            return "logged", run.info.run_id, registered_model_version
     except Exception as exc:
         print(f"MLflow logging skipped due to error: {exc}")
-        return "error", None
+        return "error", None, None
 
 
 def train_and_generate_insights(
@@ -374,6 +643,9 @@ def train_and_generate_insights(
     mlflow_experiment_name: str | None = None,
     mlflow_run_name: str | None = None,
     mlflow_registered_model_name: str | None = None,
+    mlflow_model_alias: str = "Champion",
+    optuna_enabled: bool = True,
+    optuna_trials: int = 20,
 ) -> dict[str, float | int | str | None]:
     if training_df.empty:
         raise ValueError("Training data is empty. Run extraction and loading first.")
@@ -429,24 +701,33 @@ def train_and_generate_insights(
     y_train_positive = (y_train > 0).astype(int)
     y_test_positive = (y_test > 0).astype(int)
 
+    tuned_stage1_config, tuned_stage2_config, optuna_stage1_threshold, optuna_summary = _run_optuna_tuning(
+        X_train=X_train,
+        y_train=y_train,
+        feature_columns=feature_columns,
+        discipline_column=discipline_column,
+        split_type=split_type,
+        optuna_enabled=optuna_enabled,
+        optuna_trials=optuna_trials,
+    )
+    tuning_strategy = "optuna" if optuna_summary["status"] == "completed" else "manual_threshold_search"
+
     stage1_threshold, threshold_tuning_mae, threshold_tuning_r2 = _tune_stage1_threshold(
         X_train=X_train,
         y_train=y_train,
         feature_columns=feature_columns,
         discipline_column=discipline_column,
         split_type=split_type,
+        stage1_config=tuned_stage1_config,
+        stage2_config=tuned_stage2_config,
     )
+    if optuna_stage1_threshold is not None:
+        stage1_threshold = optuna_stage1_threshold
 
-    stage1_classifier = RandomForestClassifier(
-        n_estimators=300,
-        random_state=42,
-        class_weight="balanced_subsample",
-    )
-    stage1_classifier_pipeline = Pipeline(
-        steps=[
-            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
-            ("classifier", stage1_classifier),
-        ]
+    stage1_classifier_pipeline = _build_stage1_pipeline(
+        feature_columns=feature_columns,
+        discipline_column=discipline_column,
+        **tuned_stage1_config,
     )
     stage1_classifier_pipeline.fit(X_train, y_train_positive)
     y_test_positive_proba = pd.Series(stage1_classifier_pipeline.predict_proba(X_test)[:, 1], index=y_test.index)
@@ -468,12 +749,10 @@ def train_and_generate_insights(
             "Need at least 8 positive-target workouts in the train split for stage-2 regression training."
         )
 
-    stage2_regressor = RandomForestRegressor(n_estimators=300, random_state=42)
-    stage2_regressor_pipeline = Pipeline(
-        steps=[
-            ("preprocessor", _build_preprocessor(feature_columns, discipline_column)),
-            ("regressor", stage2_regressor),
-        ]
+    stage2_regressor_pipeline = _build_stage2_pipeline(
+        feature_columns=feature_columns,
+        discipline_column=discipline_column,
+        **tuned_stage2_config,
     )
     stage2_regressor_pipeline.fit(X_train.loc[stage2_train_mask], y_train.loc[stage2_train_mask])
 
@@ -492,6 +771,8 @@ def train_and_generate_insights(
     baseline_r2 = float(r2_score(y_test, baseline_pred))
     mae_improvement_vs_baseline = baseline_mae - mae
     r2_improvement_vs_baseline = r2 - baseline_r2
+    stage1_classifier = stage1_classifier_pipeline.named_steps["classifier"]
+    stage2_regressor = stage2_regressor_pipeline.named_steps["regressor"]
 
     kmeans_features = ["ride_duration", "avg_heart_rate", "avg_output", "avg_resistance"]
     for column in kmeans_features:
@@ -560,6 +841,10 @@ def train_and_generate_insights(
             "discipline_bucket_min_rows": min_discipline_rows,
             "disciplines_kept": sorted(kept_disciplines),
             "prediction_strategy": "if stage1 predicts 0 then output 0 else stage2 prediction",
+            "tuning_strategy": tuning_strategy,
+            "tuned_stage1_config": tuned_stage1_config,
+            "tuned_stage2_config": tuned_stage2_config,
+            "optuna_status": optuna_summary["status"],
         },
         model_path,
     )
@@ -570,8 +855,20 @@ def train_and_generate_insights(
         f.write("## Model Quality\n")
         f.write(f"- Split strategy: {split_type}\n")
         f.write("- Target strategy: stage-1 zero/non-zero classification, then stage-2 regression\n")
+        f.write(f"- Tuning strategy: {tuning_strategy}\n")
         f.write(f"- MAE (total_work prediction): {mae:.2f}\n")
         f.write(f"- R^2: {r2:.3f}\n\n")
+
+        f.write("## Hyperparameter Tuning\n")
+        f.write(f"- Optuna status: {optuna_summary['status']}\n")
+        f.write(f"- Trials requested: {int(optuna_summary['trials_requested'])}\n")
+        f.write(f"- Trials completed: {int(optuna_summary['trials_completed'])}\n")
+        if optuna_summary["best_validation_mae"] is not None:
+            f.write(f"- Best Optuna validation MAE: {float(optuna_summary['best_validation_mae']):.2f}\n")
+        if optuna_summary["best_validation_r2"] is not None:
+            f.write(f"- Best Optuna validation R^2: {float(optuna_summary['best_validation_r2']):.3f}\n")
+        f.write(f"- Stage-1 config: {tuned_stage1_config}\n")
+        f.write(f"- Stage-2 config: {tuned_stage2_config}\n\n")
 
         f.write("## Stage-1 Classification (total_work > 0)\n")
         f.write(f"- Probability threshold: {stage1_threshold:.3f}\n")
@@ -633,11 +930,12 @@ def train_and_generate_insights(
         f.write(cluster_summary.to_string())
         f.write("\n")
 
-    mlflow_status, mlflow_run_id = _log_mlflow_artifacts(
+    mlflow_status, mlflow_run_id, mlflow_registered_model_version = _log_mlflow_artifacts(
         enable_mlflow=enable_mlflow,
         mlflow_experiment_name=mlflow_experiment_name,
         mlflow_run_name=mlflow_run_name,
         mlflow_registered_model_name=mlflow_registered_model_name,
+        mlflow_model_alias=mlflow_model_alias,
         stage1_classifier_pipeline=stage1_classifier_pipeline,
         stage2_regressor_pipeline=stage2_regressor_pipeline,
         classifier_n_estimators=stage1_classifier.n_estimators,
@@ -664,6 +962,18 @@ def train_and_generate_insights(
         stage1_positive_rate_test=stage1_positive_rate_test,
         stage1_pred_positive_rate_test=stage1_pred_positive_rate_test,
         stage1_threshold=stage1_threshold,
+        tuning_strategy=tuning_strategy,
+        optuna_status=str(optuna_summary["status"]),
+        optuna_trials_requested=int(optuna_summary["trials_requested"]),
+        optuna_trials_completed=int(optuna_summary["trials_completed"]),
+        optuna_best_validation_mae=(
+            None if optuna_summary["best_validation_mae"] is None else float(optuna_summary["best_validation_mae"])
+        ),
+        optuna_best_validation_r2=(
+            None if optuna_summary["best_validation_r2"] is None else float(optuna_summary["best_validation_r2"])
+        ),
+        tuned_stage1_config=tuned_stage1_config,
+        tuned_stage2_config=tuned_stage2_config,
         threshold_tuning_mae=threshold_tuning_mae,
         threshold_tuning_r2=threshold_tuning_r2,
         split_type=split_type,
@@ -690,10 +1000,23 @@ def train_and_generate_insights(
         "stage1_threshold": stage1_threshold,
         "stage1_threshold_tuning_val_mae": threshold_tuning_mae,
         "stage1_threshold_tuning_val_r2": threshold_tuning_r2,
+        "tuning_strategy": tuning_strategy,
+        "optuna_status": str(optuna_summary["status"]),
+        "optuna_trials_requested": int(optuna_summary["trials_requested"]),
+        "optuna_trials_completed": int(optuna_summary["trials_completed"]),
+        "optuna_best_validation_mae": (
+            None if optuna_summary["best_validation_mae"] is None else float(optuna_summary["best_validation_mae"])
+        ),
+        "optuna_best_validation_r2": (
+            None if optuna_summary["best_validation_r2"] is None else float(optuna_summary["best_validation_r2"])
+        ),
         "split_type": split_type,
         "cluster_count": int(n_clusters),
         "artifact_model_dir": str(model_dir),
         "artifact_report_path": str(report_path),
         "mlflow_status": mlflow_status,
         "mlflow_run_id": mlflow_run_id,
+        "mlflow_registered_model_name": mlflow_registered_model_name,
+        "mlflow_registered_model_version": mlflow_registered_model_version,
+        "mlflow_model_alias": mlflow_model_alias if mlflow_registered_model_name else None,
     }

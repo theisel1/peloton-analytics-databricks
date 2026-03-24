@@ -70,7 +70,10 @@ Recommended:
 - `MLFLOW_ENABLED=true`
 - `MLFLOW_EXPERIMENT_NAME=/Users/<you>/peloton-analytics`
 - optional `MLFLOW_RUN_NAME=peloton-ml-training`
-- optional `MLFLOW_REGISTERED_MODEL_NAME=<model_name>`
+- `MLFLOW_REGISTERED_MODEL_NAME=main.fitness.peloton_total_work_model`
+- `MLFLOW_MODEL_ALIAS=Champion`
+- `OPTUNA_ENABLED=false`
+- `OPTUNA_TRIALS=20`
 
 ### 3. Deploy with Databricks Asset Bundle (recommended)
 
@@ -108,6 +111,8 @@ Single entrypoint:
 - `databricks/run_pipeline.py`
 
 MLflow metrics and model artifacts are logged during `04_ml.py` / `run_train`.
+The stage-2 regressor is registered to Unity Catalog Model Registry and the configured alias is promoted automatically for the new version.
+Optuna tuning is available for the two-stage random forest and can be enabled when you want to run a tuning experiment.
 Logged quality metrics include:
 - `mae`, `r2`
 - `baseline_mae`, `baseline_r2`
@@ -116,6 +121,7 @@ Logged quality metrics include:
 
 Scoring output:
 - batch scoring writes predictions to `main.fitness.gold_peloton_total_work_predictions`
+- scoring notebook/job loads from `models:/<registered_model_name>@<alias>` by default
 - single scoring mode in `06_scoring.py` predicts from widget inputs
 
 ## CLI Commands

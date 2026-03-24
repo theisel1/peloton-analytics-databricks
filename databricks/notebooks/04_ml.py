@@ -23,6 +23,9 @@ dbutils.widgets.text("mlflow_enabled", "true")
 dbutils.widgets.text("mlflow_experiment_name", default_mlflow_experiment)
 dbutils.widgets.text("mlflow_run_name", "peloton-ml-training")
 dbutils.widgets.text("mlflow_registered_model_name", "")
+dbutils.widgets.text("mlflow_model_alias", "Champion")
+dbutils.widgets.text("optuna_enabled", "false")
+dbutils.widgets.text("optuna_trials", "20")
 
 repo_root = dbutils.widgets.get("repo_root")
 catalog = dbutils.widgets.get("catalog")
@@ -32,6 +35,11 @@ mlflow_enabled = dbutils.widgets.get("mlflow_enabled").strip()
 mlflow_experiment_name = dbutils.widgets.get("mlflow_experiment_name").strip()
 mlflow_run_name = dbutils.widgets.get("mlflow_run_name").strip()
 mlflow_registered_model_name = dbutils.widgets.get("mlflow_registered_model_name").strip()
+mlflow_model_alias = dbutils.widgets.get("mlflow_model_alias").strip() or "Champion"
+optuna_enabled = dbutils.widgets.get("optuna_enabled").strip()
+optuna_trials = dbutils.widgets.get("optuna_trials").strip()
+if not mlflow_registered_model_name:
+    mlflow_registered_model_name = f"{catalog}.{schema}.peloton_total_work_model"
 
 # COMMAND ----------
 
@@ -59,6 +67,12 @@ if mlflow_run_name:
     os.environ["MLFLOW_RUN_NAME"] = mlflow_run_name
 if mlflow_registered_model_name:
     os.environ["MLFLOW_REGISTERED_MODEL_NAME"] = mlflow_registered_model_name
+if mlflow_model_alias:
+    os.environ["MLFLOW_MODEL_ALIAS"] = mlflow_model_alias
+if optuna_enabled:
+    os.environ["OPTUNA_ENABLED"] = optuna_enabled
+if optuna_trials:
+    os.environ["OPTUNA_TRIALS"] = optuna_trials
 
 from peloton_databricks_pipeline.pipeline import run_train
 

@@ -36,7 +36,13 @@ variables:
   mlflow_run_name:
     default: peloton-ml-training
   mlflow_registered_model_name:
-    default: ""
+    default: main.fitness.peloton_total_work_model
+  mlflow_model_alias:
+    default: Champion
+  optuna_enabled:
+    default: "false"
+  optuna_trials:
+    default: "20"
 
 targets:
   dev:

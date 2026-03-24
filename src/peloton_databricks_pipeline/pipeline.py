@@ -155,6 +155,9 @@ def run_train(use_spark_loader: bool = False, model_base_path: str | None = None
         mlflow_experiment_name=settings.mlflow_experiment_name,
         mlflow_run_name=settings.mlflow_run_name,
         mlflow_registered_model_name=settings.mlflow_registered_model_name,
+        mlflow_model_alias=settings.mlflow_model_alias,
+        optuna_enabled=settings.optuna_enabled,
+        optuna_trials=settings.optuna_trials,
     )
 
 
@@ -223,6 +226,13 @@ def run_lakehouse(
         "artifact_report_path": train_result.get("artifact_report_path"),
         "mlflow_status": train_result.get("mlflow_status"),
         "mlflow_run_id": train_result.get("mlflow_run_id"),
+        "mlflow_registered_model_name": train_result.get("mlflow_registered_model_name"),
+        "mlflow_registered_model_version": train_result.get("mlflow_registered_model_version"),
+        "mlflow_model_alias": train_result.get("mlflow_model_alias"),
+        "tuning_strategy": train_result.get("tuning_strategy"),
+        "optuna_status": train_result.get("optuna_status"),
+        "optuna_trials_requested": train_result.get("optuna_trials_requested"),
+        "optuna_trials_completed": train_result.get("optuna_trials_completed"),
     }
 
 

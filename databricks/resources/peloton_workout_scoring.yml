@@ -24,11 +24,13 @@ resources:
               catalog: ${var.catalog}
               schema: ${var.schema}
               artifact_base_path: ${var.artifact_base_path}
-              model_source: mlflow_latest
+              model_source: registry_alias
               model_path: ""
               mlflow_experiment_name: /Users/${workspace.current_user.userName}/peloton-analytics
               mlflow_run_name: ${var.mlflow_run_name}
               mlflow_run_id: ""
+              registered_model_name: ${var.mlflow_registered_model_name}
+              registered_model_alias: ${var.mlflow_model_alias}
               mode: batch
               score_limit: "250"
               output_table: ${var.catalog}.${var.schema}.gold_peloton_total_work_predictions

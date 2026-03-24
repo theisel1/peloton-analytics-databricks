@@ -16,6 +16,7 @@ resources:
               - numpy>=1.26.0
               - joblib>=1.4.0
               - mlflow>=2.16.0
+              - optuna>=3.6.1
       tasks:
         - task_key: 01_setup
           environment_key: default
@@ -86,3 +87,6 @@ resources:
               mlflow_experiment_name: /Users/${workspace.current_user.userName}/peloton-analytics
               mlflow_run_name: ${var.mlflow_run_name}
               mlflow_registered_model_name: ${var.mlflow_registered_model_name}
+              mlflow_model_alias: ${var.mlflow_model_alias}
+              optuna_enabled: ${var.optuna_enabled}
+              optuna_trials: ${var.optuna_trials}

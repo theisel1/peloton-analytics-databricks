@@ -20,12 +20,14 @@ dbutils.widgets.text("repo_root", "/Workspace/Repos/<user>/peloton-analytics-dat
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("schema", "fitness")
 dbutils.widgets.text("artifact_base_path", "/dbfs/FileStore/peloton_analytics")
-dbutils.widgets.dropdown("model_source", "mlflow_latest", ["mlflow_latest", "path"])
+dbutils.widgets.dropdown("model_source", "registry_alias", ["registry_alias", "mlflow_latest", "path"])
 dbutils.widgets.text("model_path", "")
 default_mlflow_experiment = f"/Users/{spark.sql('SELECT current_user() AS user').first()['user']}/peloton-analytics"
 dbutils.widgets.text("mlflow_experiment_name", default_mlflow_experiment)
 dbutils.widgets.text("mlflow_run_name", "peloton-ml-training")
 dbutils.widgets.text("mlflow_run_id", "")
+dbutils.widgets.text("registered_model_name", "")
+dbutils.widgets.text("registered_model_alias", "Champion")
 dbutils.widgets.dropdown("mode", "batch", ["batch", "single"])
 dbutils.widgets.text("score_limit", "250")
 dbutils.widgets.text("output_table", "main.fitness.gold_peloton_total_work_predictions")
@@ -48,9 +50,13 @@ model_path_widget = dbutils.widgets.get("model_path").strip()
 mlflow_experiment_name = dbutils.widgets.get("mlflow_experiment_name").strip()
 mlflow_run_name = dbutils.widgets.get("mlflow_run_name").strip()
 mlflow_run_id = dbutils.widgets.get("mlflow_run_id").strip()
+registered_model_name = dbutils.widgets.get("registered_model_name").strip()
+registered_model_alias = dbutils.widgets.get("registered_model_alias").strip() or "Champion"
 mode = dbutils.widgets.get("mode").strip().lower()
 score_limit = dbutils.widgets.get("score_limit").strip()
 output_table = dbutils.widgets.get("output_table").strip()
+if not registered_model_name:
+    registered_model_name = f"{catalog}.{schema}.peloton_total_work_model"
 
 # COMMAND ----------
 
@@ -97,7 +103,29 @@ from peloton_databricks_pipeline.scoring import FEATURE_COLUMNS, load_model_bund
 default_model_path = f"{artifact_base_path.rstrip('/')}/models/peloton_work_model.joblib"
 model_path = model_path_widget or default_model_path
 bundle: dict
-if model_source == "mlflow_latest":
+if model_source == "registry_alias":
+    import mlflow.sklearn
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient()
+    model_version = client.get_model_version_by_alias(registered_model_name, registered_model_alias)
+    run_id = model_version.run_id
+    if not run_id:
+        raise ValueError(
+            f"Model {registered_model_name}@{registered_model_alias} has no run_id; cannot load stage1 artifact."
+        )
+
+    stage2 = mlflow.sklearn.load_model(f"models:/{registered_model_name}@{registered_model_alias}")
+    stage1 = mlflow.sklearn.load_model(f"runs:/{run_id}/stage1_classifier_model")
+    run = client.get_run(run_id)
+    threshold = float(run.data.params.get("stage1_threshold", "0.5"))
+    bundle = {
+        "stage1_classifier": stage1,
+        "stage2_regressor": stage2,
+        "stage1_threshold": threshold,
+    }
+    print(f"Loaded registered model: {registered_model_name}@{registered_model_alias} (run_id={run_id})")
+elif model_source == "mlflow_latest":
     import mlflow.sklearn
     from mlflow.tracking import MlflowClient
 
